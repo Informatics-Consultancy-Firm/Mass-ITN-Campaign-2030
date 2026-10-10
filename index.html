@@ -1265,7 +1265,7 @@ function gateResult(fix,r){
   closeModal();
   /* at the household: open the full form, keeping the first-visit point */
   showErr=false; editing=false;
-  form={hhrPhone:Store.get('itn_hhr_phone_'+me,'')};
+  form={};
   renderForm();
   toast('You are '+asDist(away)+' from the first point \u2014 carry on');
 }
@@ -1288,9 +1288,6 @@ const FORM=[
      when:a=>a.adults==='Yes'&&a.hasPhone==='No'},
   {id:'altPhone',    q:'Telephone number of that person', type:'tel', ph:'076123456',
      when:a=>a.adults==='Yes'&&a.hasPhone==='No'&&a.hasAlt==='Yes'},
-  {id:'hhrPhone',    q:'HHR telephone number', type:'tel', ph:'Your own number',
-     help:'The household has no number to give, so your number is recorded as the contact.',
-     when:a=>a.adults==='Yes'&&a.hasPhone==='No'&&a.hasAlt==='No'},
   {id:'size',  n:5, q:'Number of people in the household', type:'int', unit:'people', min:1, max:60,
      when:a=>a.adults==='Yes'},
   {id:'itns',  n:6, q:'ITNs to be given', type:'calc',
@@ -1300,7 +1297,16 @@ const FORM=[
      when:a=>a.adults==='Yes'},
   {id:'preg',  n:8, q:'How many pregnant women are in the household?', type:'int', unit:'pregnant women', min:0, max:20,
      when:a=>a.adults==='Yes'},
-  {id:'token', n:9, q:'Household token', type:'calc',
+  {id:'hasNid', n:9, q:'Do you have a National ID?', type:'yn', when:a=>a.adults==='Yes'},
+  {id:'nid',         q:'National ID number', type:'text', ph:'National ID number',
+     when:a=>a.adults==='Yes'&&a.hasNid==='Yes'},
+  {id:'hasDl', n:10, q:'Do you have a driver\u2019s licence?', type:'yn', when:a=>a.adults==='Yes'},
+  {id:'dl',          q:'Driver\u2019s licence number', type:'text', ph:'Driver\u2019s licence number',
+     when:a=>a.adults==='Yes'&&a.hasDl==='Yes'},
+  {id:'hasVid', n:11, q:'Do you have a Voter\u2019s ID?', type:'yn', when:a=>a.adults==='Yes'},
+  {id:'vid',         q:'Voter\u2019s ID number', type:'text', ph:'Voter\u2019s ID number',
+     when:a=>a.adults==='Yes'&&a.hasVid==='Yes'},
+  {id:'token', n:12, q:'Household token', type:'calc',
      help:'Generated from your HHR ID, the household number and the head\u2019s initials.',
      from:a=>a._token||'', when:a=>a.adults==='Yes'}
 ];
@@ -1467,10 +1473,16 @@ function gpsProblem(e){
 function gpsButton(label,kind){
   return `<button class="btn ${kind||'btn-primary'} btn-block btn-sm" style="margin-top:9px" onclick="beginGps()">${label}</button>`;
 }
+let gpsMissing=false;   /* set when Register is pressed before the GPS is captured */
 function gpsCard(){
   const secs=gpsSecs();
   const body =
-    gpsState==='ok'
+    gpsState==='idle'
+      ? `${gpsMissing?'<div class="err" style="margin:0 0 4px">Capture the GPS before registering this household.</div>':''}
+         <button class="btn btn-primary btn-block" style="margin-top:6px" onclick="gpsMissing=false;beginGps()">
+           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>
+           Capture GPS</button>`
+  : gpsState==='ok'
       ? `<div class="gps-ok">Captured \u00b7 ${gpsFix.lat}, ${gpsFix.lng} (\u00b1${gpsFix.acc} m)</div>
          ${gpsWatch!=null?`<div class="q-help" style="margin:8px 0 0">Still sharpening the point \u2014 you can carry on, the best reading is kept.</div>`:''}
          ${gpsFix.acc>GPS_GOOD&&gpsWatch==null?`<div class="q-help" style="margin:8px 0 0">\u00b1${gpsFix.acc} m is rough. Fine to submit, or take it again in the open for a tighter point.</div>
@@ -1481,12 +1493,12 @@ function gpsCard(){
          ${gpsButton('Take the GPS point')}
          ${gpsDiag?`<div class="gps-diag">${esc(gpsDiag)}</div>`:''}`
   :       `<div class="sync-bar wait" style="margin:0"><span class="d"></span>
-            <div class="t">Looking for the location\u2026 ${secs}s. Carry on with the questions \u2014 it keeps searching in the background.</div></div>
+            <div class="t">Capturing the location\u2026 ${secs}s. Stay where you are, in the open if you can.</div></div>
            ${secs>=8?gpsButton('Take the GPS point now','btn-ghost'):''}`;
-  return `<div class="q-card" id="qc_gps">
+  return `<div class="q-card ${gpsMissing&&gpsState==='idle'?'missing':''}" id="qc_gps">
     <span class="q-no">GPS</span>
     <div class="q-txt">Location of the household</div>
-    <div class="q-help">Taken automatically, no typing. Recorded with the household when you submit.</div>
+    <div class="q-help">Last step. Stand at the household and press Capture GPS.</div>
     ${body}</div>`;
 }
 function paintGps(){ const e=document.getElementById('qc_gps'); if(e) e.outerHTML=gpsCard(); }
@@ -1495,14 +1507,13 @@ function openHH(d,h){
   if(!hhOpen(d,h)){ renderDay(d); return; }
   formD=d; formH=h; showErr=false; editing=false;
   form=Object.assign({},recGet(d,h));
-  if(!form.hhrPhone) form.hhrPhone=Store.get('itn_hhr_phone_'+me,'');
   if(isDone(d,h)){
     gpsStop(); gpsFix=null; gpsState='idle';
     isRevisit(recGet(d,h)) ? renderRevisitCard() : renderSaved();
     return;
   }
   renderForm();
-  beginGps();          /* start the fix now, not at the end */
+  gpsStop(); gpsFix=null; gpsState='idle'; gpsMissing=false;   /* GPS waits for the Capture GPS button */
 }
 /* Editing changes the values of an existing record. Its token has already been
    written on paper and given to the household head, so the token is frozen
@@ -1573,6 +1584,9 @@ function wireForm(){
     form[o.dataset.q]=o.dataset.v;
     if(o.dataset.q==='hasPhone'){ delete form.hasAlt; delete form.phone; delete form.altPhone; }
     if(o.dataset.q==='hasAlt'){ delete form.altPhone; }
+    if(o.dataset.q==='hasNid'&&o.dataset.v==='No') delete form.nid;
+    if(o.dataset.q==='hasDl'&&o.dataset.v==='No') delete form.dl;
+    if(o.dataset.q==='hasVid'&&o.dataset.v==='No') delete form.vid;
     renderForm();
     const c=document.getElementById('qc_'+o.dataset.q); if(c) c.scrollIntoView({behavior:'smooth',block:'center'});
   });
@@ -1610,6 +1624,12 @@ function submitHH(){
   }
   showErr=false;
   if(editing){ saveEdit(); return; }
+  if(!(gpsState==='ok'&&gpsFix)){
+    if(gpsState==='idle'){ gpsMissing=true; paintGps(); }
+    const g=document.getElementById('qc_gps'); if(g) g.scrollIntoView({behavior:'smooth',block:'center'});
+    toast(gpsState==='getting'?'Wait for the GPS to be captured':'Press Capture GPS first');
+    return;
+  }
   /* nobody home: no names, no token — just the point and a revisit flag */
   if(form.adults==='No'){ gpsStep(finishRevisit); return; }
   tokenStep(false);
@@ -1626,7 +1646,6 @@ function saveEdit(){
     _updatedAt:new Date().toISOString()
   });
   delete rec._token;
-  if(rec.hhrPhone) Store.set('itn_hhr_phone_'+me,rec.hhrPhone);
   recSet(d,h,rec);
   editing=false;
   const was=!!old._submitted;
@@ -1707,7 +1726,6 @@ function finish(gps){
     _ts:was._ts||new Date().toISOString(), _registeredAt:new Date().toISOString()
   });
   delete rec._token;
-  if(rec.hhrPhone) Store.set('itn_hhr_phone_'+me,rec.hhrPhone);
   recSet(d,h,rec);
   setDone(d,h,true);
   gpsStop(); gpsFix=null; gpsState='idle';
@@ -1797,7 +1815,7 @@ function renderSaved(){
   const row=(k,v)=>`<div class="rv-item"><span class="q">${esc(k)}</span><span class="a">${esc(v===''||v==null?'\u2014':v)}</span></div>`;
   const contact = r.hasPhone==='Yes' ? r.phone+' (household head)'
     : r.hasAlt==='Yes' ? r.altPhone+' (someone else)'
-    : r.hhrPhone ? r.hhrPhone+' (HHR)' : '\u2014';
+    : r.hhrPhone ? r.hhrPhone+' (HHR)' : 'No number given';
   app.innerHTML=`<div class="appbar">
       <button class="ico-btn" onclick="renderDay(${d})">${I.back}</button>
       <div class="titles"><div class="eyebrow">${esc(me)} \u00b7 Day ${d}</div><div class="title">Household ${h} \u00b7 registered</div></div>
@@ -1820,6 +1838,9 @@ function renderSaved(){
         ${row('ITNs to be given',r.itns)}
         ${row('Under-fives',r.u5)}
         ${row('Pregnant women',r.preg)}
+        ${row('National ID',r.hasNid==='Yes'?r.nid:'No')}
+        ${row('Driver\u2019s licence',r.hasDl==='Yes'?r.dl:'No')}
+        ${row('Voter\u2019s ID',r.hasVid==='Yes'?r.vid:'No')}
         ${row('Token',r.token)}
         ${row('GPS',r.gpsLat?r.gpsLat+', '+r.gpsLng+' (\u00b1'+r.gpsAcc+' m)':'not recorded')}
         ${row('Revision',r._rev||1)}
