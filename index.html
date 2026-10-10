@@ -1307,7 +1307,7 @@ const FORM=[
   {id:'vid',         q:'Voter\u2019s ID number', type:'text', ph:'Voter\u2019s ID number',
      when:a=>a.adults==='Yes'&&a.hasVid==='Yes'},
   {id:'token', n:12, q:'Household token', type:'calc',
-     help:'Generated from your HHR ID, the household number and the head\u2019s initials.',
+     help:'District, chiefdom and PHU (first 3 letters each), the head\u2019s initials, then the date and time in GMT. The time is fixed when you press Register.',
      from:a=>a._token||'', when:a=>a.adults==='Yes'}
 ];
 function itnsFor(size){
@@ -1320,9 +1320,20 @@ function itnsFor(size){
 /* HHR01_1_MK — the household number runs across the whole 10 days for this
    HHR (Day 1 HH1 = 1 … Day 10 HH25 = 250) so no two tokens can collide. */
 function hhSerial(d,h){ return (d-1)*PER_DAY+h; }
-function tokenFor(id,d,h,first,last){
-  const ini=(String(first||'').trim()[0]||'')+(String(last||'').trim()[0]||'');
-  return id+'_'+hhSerial(d,h)+'_'+ini.toUpperCase();
+/* e-token: DIS_CHI_PHU_INITIALS_DDMMYYYY_HH_MM, time in GMT.
+   First three letters of district, chiefdom and PHU (spaces and symbols
+   dropped), the head's initials, then the date and time the token is issued.
+   Community is to be added after the PHU once a community list exists. */
+const code3=s=>String(s||'').replace(/[^A-Za-z0-9]/g,'').slice(0,3).toUpperCase();
+function tokenStamp(when){
+  const t=when?new Date(when):new Date();
+  return pad(t.getUTCDate(),2)+pad(t.getUTCMonth()+1,2)+t.getUTCFullYear()
+        +'_'+pad(t.getUTCHours(),2)+'_'+pad(t.getUTCMinutes(),2);
+}
+function tokenFor(id,d,h,first,last,when){
+  const pl=hhrPlace(id)||{};
+  const ini=((String(first||'').trim()[0]||'')+(String(last||'').trim()[0]||'')).toUpperCase();
+  return [code3(pl.district),code3(pl.chiefdom),code3(pl.phu),ini,tokenStamp(when)].join('_');
 }
 const digits=v=>String(v||'').replace(/\D/g,'');
 const PHONE_LEN=9;
@@ -1525,7 +1536,7 @@ function editHH(){
 }
 function refreshToken(){
   if(editing&&form.token){ form._token=form.token; return; }
-  form._token=tokenFor(me,formD,formH,form.first,form.last);
+  form._token=tokenFor(me,formD,formH,form.first,form.last,form._tokAt);
 }
 
 function ctl(q){
@@ -1632,6 +1643,7 @@ function submitHH(){
   }
   /* nobody home: no names, no token — just the point and a revisit flag */
   if(form.adults==='No'){ gpsStep(finishRevisit); return; }
+  form._tokAt=new Date().toISOString(); refreshToken();
   tokenStep(false);
 }
 /* An edit keeps the record's _id, token and GPS point, bumps its revision and
